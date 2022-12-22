@@ -1,15 +1,18 @@
-import 'package:firebase_auth/firebase_auth.dart';
+// ignore_for_file: unused_import, file_names
+
 import 'package:flutter/material.dart';
-import 'package:rakshak/results_screen/ForgotPassword.dart';
-import 'package:rakshak/results_screen/GoogleDone.dart';
-import 'package:rakshak/main_screens/RegisterPage.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import '../results_screen/Done.dart';
-import 'package:rakshak/main_screens/TestPage.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
+
 import 'package:modal_progress_hud/modal_progress_hud.dart';
 import 'dart:math';
+import 'package:firebase_auth/firebase_auth.dart';
+
 import 'package:rakshak/main_screens/PopupResult.dart';
-import 'package:flutter/services.dart';
+import 'package:rakshak/main_screens/sensor/ReadSensorData.dart';
+
+import 'dart:async';
+import 'dart:convert';
 
 // bool _wrongEmail = false;
 // bool _wrongPassword = false;
@@ -19,7 +22,10 @@ late User _user;
 
 // ignore: must_be_immutable
 class O2 extends StatefulWidget {
+  final BluetoothDevice device;
   static String id = '/O2';
+
+  const O2({Key? key, required this.device}) : super(key: key);
 
   @override
   _O2State createState() => _O2State();
@@ -27,8 +33,15 @@ class O2 extends StatefulWidget {
 
 class _O2State extends State<O2> with TickerProviderStateMixin {
   late AnimationController controller;
-  bool _showSpinner = false;
+  final bool _showSpinner = false;
   late int result;
+
+  BluetoothConnection? connection;
+  late ReadSensorData readSensorData;
+
+  bool isConnecting = true;
+  bool isDisconnecting = false;
+  bool get isConnected => (connection?.isConnected ?? false);
 
   late AnimationController _animationController;
 
@@ -37,15 +50,43 @@ class _O2State extends State<O2> with TickerProviderStateMixin {
     super.initState();
     _animationController = AnimationController(
       vsync: this,
-      duration: Duration(seconds: 30),
+      duration: const Duration(seconds: 30),
     );
 
     _animationController.addListener(() => setState(() {}));
     TickerFuture tickerFuture = _animationController.repeat();
-    tickerFuture.timeout(Duration(seconds: 3 * 10), onTimeout: () {
+    tickerFuture.timeout(const Duration(seconds: 3 * 10), onTimeout: () {
       _animationController.forward(from: 0);
       _animationController.stop(canceled: true);
     });
+
+    BluetoothConnection.toAddress(widget.device.address).then((_connection) {
+      print('Positive. Connected to the device');
+      connection = _connection;
+      readSensorData = ReadSensorData(_connection);
+      readSensorData.startListening();
+      setState(() {
+        isConnecting = false;
+        isDisconnecting = false;
+      });
+    });
+  }
+
+  void _sendMessage(String text) async {
+    text = text.trim();
+    print(text);
+
+    if (text.isNotEmpty) {
+      try {
+        connection?.output.add(Uint8List.fromList(utf8.encode(text)));
+        // connection!.output.add(Uint8List.fromList(utf8.encode(text)));
+        await connection!.output.allSent;
+      } catch (e) {
+        print(e);
+        // Ignore error, but notify state
+        setState(() {});
+      }
+    }
   }
 
   // @override
@@ -63,11 +104,18 @@ class _O2State extends State<O2> with TickerProviderStateMixin {
   @override
   void dispose() {
     controller.dispose();
+
+    if (isConnected) {
+      isDisconnecting = true;
+      connection?.dispose();
+      connection = null;
+    }
+
     super.dispose();
   }
 
   void displayDialog(BuildContext context) {
-    Random random = new Random();
+    Random random = Random();
     result = random.nextInt(100);
 
     showDialog(
@@ -95,12 +143,12 @@ class _O2State extends State<O2> with TickerProviderStateMixin {
         color: Colors.blueAccent,
         child: Stack(
           children: [
-            Align(
+            const Align(
               alignment: Alignment.topRight,
               // child: Image.asset('assets/images/background.png'),
             ),
             Padding(
-              padding: EdgeInsets.only(
+              padding: const EdgeInsets.only(
                   top: 90.0, bottom: 60.0, left: 40.0, right: 40.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -121,7 +169,7 @@ class _O2State extends State<O2> with TickerProviderStateMixin {
                   ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+                    children: const [
                       SizedBox(height: 10),
                       Text(
                         'To measure the Oxygen level in the body do the following',
@@ -145,7 +193,7 @@ class _O2State extends State<O2> with TickerProviderStateMixin {
                   ),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+                    children: const [
                       SizedBox(height: 10),
                       Text(
                         'Please put you finger on the sensor for minimum 30 seconds',
@@ -163,8 +211,9 @@ class _O2State extends State<O2> with TickerProviderStateMixin {
                         style: TextStyle(fontSize: 20),
                       ),
                       LinearProgressIndicator(
-                        backgroundColor: Color.fromARGB(255, 170, 147, 216),
-                        valueColor: new AlwaysStoppedAnimation<Color>(
+                        backgroundColor:
+                            const Color.fromARGB(255, 170, 147, 216),
+                        valueColor: const AlwaysStoppedAnimation<Color>(
                           Color.fromARGB(255, 45, 15, 106),
                         ),
                         value: _animationController.value,
@@ -180,6 +229,8 @@ class _O2State extends State<O2> with TickerProviderStateMixin {
                                 MaterialStateProperty.all(Colors.green)),
                         onPressed: () {
                           displayDialog(context);
+                          // _sendMessage("Your O2 saturation is: $result");
+                          _sendMessage("S");
                         },
                         child: const Text(
                           'Done',
